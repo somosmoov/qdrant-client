@@ -37,6 +37,7 @@ grpcio-tools = [
     { version = "1.48.2", python = "3.10" },
     { version = "^1.46" }
 ]
+mypy-protobuf = "^3.3.0" # protobuf plugin for mypy stubs
 coverage = "^6.3.3"
 pytest-asyncio = "^0.21.0"
 pytest-timeout = "^2.1.0"
