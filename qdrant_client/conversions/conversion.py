@@ -943,7 +943,7 @@ class GrpcToRest:
 
     @classmethod
     def convert_sample(cls, model: grpc.Sample) -> rest.Sample:
-        if model == grpc.Sample.RANDOM:
+        if model == grpc.Sample.Random:
             return rest.Sample.RANDOM
 
         raise ValueError(f"invalid Fusion model: {model}")  # pragma: no cover
@@ -2576,7 +2576,7 @@ class RestToGrpc:
     @classmethod
     def convert_sample(cls, model: rest.Sample) -> grpc.Sample:
         if model == rest.Sample.RANDOM:
-            return grpc.Sample.RANDOM
+            return grpc.Sample.Random
 
         raise ValueError(f"invalid Sample model: {model}")
 
