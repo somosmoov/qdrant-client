@@ -1079,8 +1079,7 @@ query_fusion = grpc.Query(fusion=grpc.Fusion.RRF)
 
 deep_prefetch_query = grpc.PrefetchQuery(query=query_recommend)
 prefetch_query = grpc.PrefetchQuery(
-    prefetch=[deep_prefetch_query],
-    filter=filter_,
+    prefetch=[deep_prefetch_query], filter=filter_, query=grpc.Query(sample=grpc.Sample.Random)
 )
 prefetch_full_query = grpc.PrefetchQuery(
     prefetch=[prefetch_query],

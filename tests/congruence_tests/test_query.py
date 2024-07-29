@@ -230,9 +230,7 @@ class TestSimpleSearcher:
         )
 
     def filter_dense_query_group(
-        self,
-        client: QdrantBase,
-        query_filter: models.Filter
+        self, client: QdrantBase, query_filter: models.Filter
     ) -> GroupsResult:
         return client.query_points_groups(
             collection_name=COLLECTION_NAME,
@@ -264,7 +262,9 @@ class TestSimpleSearcher:
             limit=self.limit,
         )
 
-    def dense_query_lookup_from_group(self, client: QdrantBase, lookup_from: models.LookupLocation) -> GroupsResult:
+    def dense_query_lookup_from_group(
+        self, client: QdrantBase, lookup_from: models.LookupLocation
+    ) -> GroupsResult:
         return client.query_points_groups(
             collection_name=COLLECTION_NAME,
             query=models.RecommendQuery(
@@ -624,12 +624,26 @@ class TestSimpleSearcher:
     def no_query_no_prefetch(cls, client: QdrantBase) -> models.QueryResponse:
         return client.query_points(collection_name=COLLECTION_NAME, limit=10)
 
+    @classmethod
+    def random_query(cls, client: QdrantBase) -> models.QueryResponse:
+        result = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=models.SampleQuery(sample=models.Sample.RANDOM),
+            limit=100,
+        )
+
+        # sort to be able to compare
+        result.points.sort(key=lambda point: point.id)
+
+        return result
+
 
 def group_by_keys():
     return ["maybe", "rand_digit", "two_words", "city.name", "maybe_null", "id"]
 
 
 # ---- TESTS  ---- #
+
 
 def test_dense_query_lookup_from_another_collection():
     fixture_points = generate_fixtures(10)
@@ -1294,3 +1308,18 @@ def test_query_group(prefer_grpc):
         except AssertionError as e:
             print(f"\nFailed with filter {query_filter}")
             raise e
+
+
+@pytest.mark.parametrize("prefer_grpc", [False, True])
+def test_random_sampling(prefer_grpc):
+    fixture_points = generate_fixtures(100)
+
+    searcher = TestSimpleSearcher()
+
+    local_client = init_local()
+    init_client(local_client, fixture_points)
+
+    remote_client = init_remote(prefer_grpc=prefer_grpc)
+    init_client(remote_client, fixture_points)
+
+    compare_client_results(local_client, remote_client, searcher.random_query)
