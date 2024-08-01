@@ -5,7 +5,7 @@ import pytest
 
 from qdrant_client.client_base import QdrantBase
 from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.http.models import models
+from qdrant_client.http.models import models, GroupsResult
 from tests.congruence_tests.test_common import (
     COLLECTION_NAME,
     code_vector_size,
@@ -35,8 +35,15 @@ class TestSimpleSearcher:
     __test__ = False
 
     def __init__(self):
+        # group by
+        self.group_by = "city.geo"
+        self.group_size = 3
+        self.limit = 2  # number of groups
+
         # dense query vectors
         self.dense_vector_query_text = np.random.random(text_vector_size).tolist()
+        self.dense_vector_query_text_bis = self.dense_vector_query_text
+        self.dense_vector_query_text_bis[0] += 42.0  # slightly different vector
         self.dense_vector_query_image = np.random.random(image_vector_size).tolist()
         self.dense_vector_query_code = np.random.random(code_vector_size).tolist()
 
@@ -92,7 +99,8 @@ class TestSimpleSearcher:
             limit=10,
         )
 
-    def dense_query_text_by_id(self, client: QdrantBase) -> models.QueryResponse:
+    @classmethod
+    def dense_query_text_by_id(cls, client: QdrantBase) -> models.QueryResponse:
         return client.query_points(
             collection_name=COLLECTION_NAME,
             query=1,
@@ -196,6 +204,77 @@ class TestSimpleSearcher:
             with_payload=False,
             with_vectors=["image", "code"],
             limit=10,
+        )
+
+    def dense_query_group(self, client: QdrantBase) -> GroupsResult:
+        return client.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            query=self.dense_vector_query_text,
+            using="text",
+            group_by=self.group_by,
+            group_size=self.group_size,
+            limit=self.limit,
+            with_payload=models.PayloadSelectorInclude(include=[self.group_by]),
+        )
+
+    def dense_query_group_with_lookup(self, client: QdrantBase) -> GroupsResult:
+        return client.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            query=self.dense_vector_query_text,
+            using="text",
+            group_by=self.group_by,
+            group_size=self.group_size,
+            limit=self.limit,
+            with_payload=models.PayloadSelectorInclude(include=[self.group_by]),
+            with_lookup=SECONDARY_COLLECTION_NAME,
+        )
+
+    def filter_dense_query_group(
+        self,
+        client: QdrantBase,
+        query_filter: models.Filter
+    ) -> GroupsResult:
+        return client.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            query=self.dense_vector_query_text,
+            query_filter=query_filter,
+            using="text",
+            group_by=self.group_by,
+            group_size=self.group_size,
+            limit=self.limit,
+            with_payload=True,
+        )
+
+    def dense_queries_rescore_group(self, client: QdrantBase) -> GroupsResult:
+        return client.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            prefetch=[
+                models.Prefetch(
+                    query=self.dense_vector_query_text,
+                    using="text",
+                    limit=20,
+                ),
+            ],
+            # slightly different vector for rescoring because group_by is not super accurate with rescoring
+            query=self.dense_vector_query_text_bis,
+            using="text",
+            with_payload=models.PayloadSelectorInclude(include=[self.group_by]),
+            group_by=self.group_by,
+            group_size=self.group_size,
+            limit=self.limit,
+        )
+
+    def dense_query_lookup_from_group(self, client: QdrantBase, lookup_from: models.LookupLocation) -> GroupsResult:
+        return client.query_points_groups(
+            collection_name=COLLECTION_NAME,
+            query=models.RecommendQuery(
+                recommend=models.RecommendInput(positive=[1, 2], negative=[3, 4])
+            ),
+            using="text",
+            lookup_from=lookup_from,
+            group_by=self.group_by,
+            group_size=self.group_size,
+            limit=self.limit,
         )
 
     def filter_dense_query_text(
@@ -527,8 +606,9 @@ class TestSimpleSearcher:
             using="image",
         )
 
+    @classmethod
     def dense_query_lookup_from(
-        self, client: QdrantBase, lookup_from: models.LookupLocation
+        cls, client: QdrantBase, lookup_from: models.LookupLocation
     ) -> models.QueryResponse:
         return client.query_points(
             collection_name=COLLECTION_NAME,
@@ -545,8 +625,11 @@ class TestSimpleSearcher:
         return client.query_points(collection_name=COLLECTION_NAME, limit=10)
 
 
-# ---- TESTS  ---- #
+def group_by_keys():
+    return ["maybe", "rand_digit", "two_words", "city.name", "maybe_null", "id"]
 
+
+# ---- TESTS  ---- #
 
 def test_dense_query_lookup_from_another_collection():
     fixture_points = generate_fixtures(10)
@@ -787,7 +870,8 @@ def test_multivec_query():
     compare_client_results(local_client, remote_client, searcher.multivec_query_text)
 
 
-def test_dense_query():
+@pytest.mark.parametrize("prefer_grpc", (False, True))
+def test_dense_query(prefer_grpc):
     fixture_points = generate_fixtures()
 
     searcher = TestSimpleSearcher()
@@ -795,7 +879,7 @@ def test_dense_query():
     local_client = init_local()
     init_client(local_client, fixture_points)
 
-    remote_client = init_remote()
+    remote_client = init_remote(prefer_grpc=prefer_grpc)
     init_client(remote_client, fixture_points)
 
     compare_client_results(local_client, remote_client, searcher.dense_query_text)
@@ -1165,3 +1249,48 @@ def test_flat_query_multivector_interface(prefer_grpc):
     init_client(remote_client, fixture_points, vectors_config=multi_vector_config)
 
     compare_client_results(local_client, remote_client, searcher.multivec_query_text)
+
+
+@pytest.mark.parametrize("prefer_grpc", (False, True))
+def test_query_group(prefer_grpc):
+    fixture_points = generate_fixtures()
+
+    secondary_collection_points = generate_fixtures(10)
+
+    searcher = TestSimpleSearcher()
+
+    local_client = init_local()
+    init_client(local_client, fixture_points)
+    init_client(local_client, secondary_collection_points, SECONDARY_COLLECTION_NAME)
+
+    remote_client = init_remote(prefer_grpc=prefer_grpc)
+    init_client(remote_client, fixture_points)
+    init_client(remote_client, secondary_collection_points, SECONDARY_COLLECTION_NAME)
+
+    searcher.group_size = 5
+    searcher.limit = 3
+    for key in group_by_keys():
+        searcher.group_by = key
+        compare_client_results(local_client, remote_client, searcher.dense_query_group)
+        compare_client_results(local_client, remote_client, searcher.dense_query_group_with_lookup)
+        compare_client_results(local_client, remote_client, searcher.dense_queries_rescore_group)
+        compare_client_results(
+            local_client,
+            remote_client,
+            searcher.dense_query_lookup_from_group,
+            lookup_from=models.LookupLocation(collection=SECONDARY_COLLECTION_NAME, vector="text"),
+        )
+
+    searcher.group_by = "city.name"
+    for i in range(100):
+        query_filter = one_random_filter_please()
+        try:
+            compare_client_results(
+                local_client,
+                remote_client,
+                searcher.filter_dense_query_group,
+                query_filter=query_filter,
+            )
+        except AssertionError as e:
+            print(f"\nFailed with filter {query_filter}")
+            raise e

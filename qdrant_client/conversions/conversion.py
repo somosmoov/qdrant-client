@@ -2522,8 +2522,8 @@ class RestToGrpc:
     @classmethod
     def convert_recommend_input(cls, model: rest.RecommendInput) -> grpc.RecommendInput:
         return grpc.RecommendInput(
-            positive=[cls.convert_vector_input(vector) for vector in model.positive],
-            negative=[cls.convert_vector_input(vector) for vector in model.negative],
+            positive=[cls.convert_vector_input(vector) for vector in model.positive] if model.positive is not None else None,
+            negative=[cls.convert_vector_input(vector) for vector in model.negative] if model.negative is not None else None,
             strategy=cls.convert_recommend_strategy(model.strategy)
             if model.strategy is not None
             else None,
